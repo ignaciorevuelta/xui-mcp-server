@@ -34,6 +34,7 @@ import {
   adminCall,
   paginate,
 } from "./admin.js";
+import { CATALOG_ACTIONS, authenticate, catalog, shortEpg } from "./player.js";
 import type { SshTarget } from "./ssh.js";
 import { install, preflight, repair, status } from "./provision.js";
 
@@ -987,6 +988,226 @@ Examples:
         "",
         "```json",
         JSON.stringify(result.data ?? null, null, 2).slice(0, 4000),
+        "```",
+      ].join("\n");
+      return respondList(output, md, response_format);
+    } catch (error) {
+      return toErrorResult(error);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Player API tools
+//
+// This is the surface end-user apps talk to, authenticated with a line's own
+// username and password rather than an API key. It is the only way to see what
+// a customer sees, which is what makes it worth having alongside the panel-side
+// tools: "the panel says the line is active" and "the line actually works" are
+// different questions.
+// ---------------------------------------------------------------------------
+
+const lineCredentialFields = {
+  username: z.string().min(1).max(128).describe("The line's username, as the customer uses it"),
+  password: z.string().min(1).max(128).describe("The line's password"),
+};
+
+server.registerTool(
+  "xui_player_check_line",
+  {
+    title: "Check a line from the customer's side",
+    description: `Authenticate a line against the Player API — the same endpoint an IPTV app uses — and report what the customer's player would see. Read-only.
+
+Answers the question the panel cannot: the panel may show a line as active while the customer still cannot log in, because expiry, connection limits or allowed output formats are evaluated here.
+
+Args:
+  - username, password: the line's own credentials
+  - response_format ('markdown' | 'json')
+
+Returns:
+  {
+    "authenticated": boolean,          // false means the player would refuse to log in
+    "username": string,
+    "status": string,                  // panel-reported, e.g. "Active"
+    "message": string,                 // the panel's welcome or rejection text
+    "expires_at": string | null,       // ISO-8601 UTC
+    "expires_at_unix": number | null,
+    "is_trial": boolean,
+    "active_connections": number,
+    "max_connections": number,
+    "allowed_output_formats": string[],// EMPTY means playback is refused whatever else is right
+    "server_url": string, "server_port": string, "https_port": string,
+    "panel_version": string
+  }
+
+Examples:
+  - Use when: "Customer says the app won't log in" — this shows whether it is credentials,
+    expiry or connection limits.
+  - Use when: Confirming a line you just created actually works before sending it out.
+
+An empty allowed_output_formats is the classic cause of "logs in but nothing plays": the
+line's allowed_outputs holds format names instead of the ids the panel expects.`,
+    inputSchema: { ...lineCredentialFields, response_format: ResponseFormat },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ username, password, response_format }): Promise<ToolResult> => {
+    try {
+      const a = await authenticate({ username, password });
+      const output = {
+        authenticated: a.authenticated,
+        username: a.username,
+        status: a.status,
+        message: a.message,
+        expires_at: a.expiresAt,
+        expires_at_unix: a.expiresAtUnix,
+        is_trial: a.isTrial,
+        active_connections: a.activeConnections,
+        max_connections: a.maxConnections,
+        allowed_output_formats: a.allowedOutputFormats,
+        server_url: a.serverUrl,
+        server_port: a.serverPort,
+        https_port: a.httpsPort,
+        panel_version: a.panelVersion,
+      };
+      const md = [
+        `# Line ${a.username}`,
+        "",
+        `- **Authenticated**: ${a.authenticated ? "yes" : "NO"}`,
+        `- **Status**: ${a.status || "(not reported)"}${a.message ? ` — ${a.message}` : ""}`,
+        `- **Expires**: ${a.expiresAt ?? "never / not set"}`,
+        `- **Connections**: ${a.activeConnections} of ${a.maxConnections}`,
+        `- **Trial**: ${a.isTrial ? "yes" : "no"}`,
+        `- **Output formats**: ${a.allowedOutputFormats.length ? a.allowedOutputFormats.join(", ") : "NONE — playback will be refused"}`,
+        `- **Server**: ${a.serverUrl || "?"}:${a.serverPort || "?"} (panel ${a.panelVersion || "?"})`,
+      ].join("\n");
+      return respond(output, md, response_format);
+    } catch (error) {
+      return toErrorResult(error);
+    }
+  },
+);
+
+server.registerTool(
+  "xui_player_browse",
+  {
+    title: "Browse a line's catalogue",
+    description: `List what a line can actually see: live categories and channels, VOD categories and movies, or series. Read-only, and exactly what the customer's app receives.
+
+Args:
+  - username, password: the line's own credentials
+  - resource (enum): get_live_categories, get_live_streams, get_vod_categories,
+    get_vod_streams, get_series_categories, get_series
+  - category_id (string, optional): restrict streams to one category
+  - limit (number): rows to return, 1-500 (default: 50)
+  - offset (number): rows to skip (default: 0)
+  - response_format ('markdown' | 'json')
+
+Returns: { "resource", "total", "count", "offset", "items", "has_more", "next_offset" }
+
+Examples:
+  - Use when: "Customer says half the channels are missing" — compare this against the
+    bouquet the panel thinks they have.
+  - Use when: Verifying a newly created bouquet reaches customers at all.
+  - Don't use when: You want every stream on the panel regardless of entitlement —
+    that is xui_admin_list with resource=get_streams.
+
+An empty list from a line that authenticates usually means no bouquet is assigned.`,
+    inputSchema: {
+      ...lineCredentialFields,
+      resource: z.enum(CATALOG_ACTIONS).describe("Which part of the catalogue to read"),
+      category_id: z.string().optional().describe("Restrict to one category id"),
+      limit: z.number().int().min(1).max(500).default(50).describe("Rows to return"),
+      offset: z.number().int().min(0).default(0).describe("Rows to skip"),
+      response_format: ResponseFormat,
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ username, password, resource, category_id, limit, offset, response_format }): Promise<ToolResult> => {
+    try {
+      const all = await catalog({ username, password }, resource, category_id);
+      const { page, total, hasMore, nextOffset } = paginate(all, limit, offset);
+      const output = {
+        resource,
+        total,
+        count: page.length,
+        offset,
+        items: page,
+        has_more: hasMore,
+        ...(nextOffset !== undefined ? { next_offset: nextOffset } : {}),
+      };
+      const md = [
+        `# ${resource} for ${username}`,
+        "",
+        total === 0
+          ? "Empty. A line that authenticates but sees nothing usually has no bouquet assigned."
+          : `${total} row(s), showing ${page.length} from offset ${offset}.`,
+        "",
+        "```json",
+        JSON.stringify(page, null, 2).slice(0, 4000),
+        "```",
+      ].join("\n");
+      return respondList(output, md, response_format);
+    } catch (error) {
+      return toErrorResult(error);
+    }
+  },
+);
+
+server.registerTool(
+  "xui_player_epg",
+  {
+    title: "Read a channel's EPG as the customer sees it",
+    description: `Fetch the short EPG for one live stream through the Player API. Read-only.
+
+Args:
+  - username, password: the line's own credentials
+  - stream_id (string): numeric live stream id, as returned by xui_player_browse
+  - limit (number): listings to return, 1-100 (default: 10)
+  - response_format ('markdown' | 'json')
+
+Returns: { "stream_id": string, "count": number, "listings": object[] }
+
+Examples:
+  - Use when: "The guide is empty in the app" — an empty result here with EPG configured
+    on the panel points at the stream's epg_id mapping rather than the EPG source.
+
+An empty listing set is normal on a panel with no EPG source configured.`,
+    inputSchema: {
+      ...lineCredentialFields,
+      stream_id: z.string().regex(/^\d+$/, "Stream id must be numeric").describe("Live stream id"),
+      limit: z.number().int().min(1).max(100).default(10).describe("Listings to return"),
+      response_format: ResponseFormat,
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ username, password, stream_id, limit, response_format }): Promise<ToolResult> => {
+    try {
+      const listings = await shortEpg({ username, password }, stream_id, limit);
+      const output = { stream_id, count: listings.length, listings };
+      const md = [
+        `# EPG for stream ${stream_id}`,
+        "",
+        listings.length === 0
+          ? "No listings. Normal when the panel has no EPG source, otherwise check the stream's epg_id."
+          : `${listings.length} listing(s).`,
+        "",
+        "```json",
+        JSON.stringify(listings, null, 2).slice(0, 3000),
         "```",
       ].join("\n");
       return respondList(output, md, response_format);

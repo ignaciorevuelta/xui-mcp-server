@@ -25,6 +25,11 @@ export interface XuiConfig {
   adminUrl?: string;
   adminApiKey?: string;
   /**
+   * Player API base. Optional: it is derived from the origin of `url` when
+   * unset, which is right for a normal single-domain panel.
+   */
+  playerUrl?: string;
+  /**
    * Provisioning opens a root SSH session and installs software on a remote
    * machine — a far larger blast radius than the API tools, so it is opt-in
    * and can be pinned to specific hosts.
@@ -94,6 +99,7 @@ export function loadConfig(): XuiConfig {
     allowDelete: readBool("XUI_ALLOW_DELETE", false),
     adminUrl,
     adminApiKey,
+    playerUrl: process.env.XUI_PLAYER_URL?.trim() || undefined,
     // On by default: this server is meant to take a machine from bare to working
     // panel, so the tools that do it are available out of the box. Set
     // XUI_ALLOW_PROVISIONING=false to remove remote execution entirely, and

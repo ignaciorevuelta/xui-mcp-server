@@ -36,7 +36,7 @@ console.log("\n== admin tools, read-only ==");
   const { tools } = await client.listTools();
   const admin = tools.filter((t) => t.name.startsWith("xui_admin_"));
   check("admin tools registered", admin.length === 5, admin.map((t) => t.name).join(", "));
-  check("total tool count", tools.length === 17, `${tools.length} tools`);
+  check("total tool count", tools.length === 20, `${tools.length} tools`);
 
   const users = await client.callTool({
     name: "xui_admin_list",

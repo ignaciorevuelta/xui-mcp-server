@@ -38,11 +38,15 @@ console.log("\n== read-only mode (defaults) ==");
   const client = await connect({});
   const { tools } = await client.listTools();
   const reseller = tools.filter(
-    (t) => !t.name.startsWith("xui_admin_") && !t.name.startsWith("xui_server_"),
+    (t) =>
+      !t.name.startsWith("xui_admin_") &&
+      !t.name.startsWith("xui_server_") &&
+      !t.name.startsWith("xui_player_"),
   );
   check("reseller tools registered", reseller.length === 8, `${reseller.length} of ${tools.length}`);
   check("admin tools registered", tools.filter((t) => t.name.startsWith("xui_admin_")).length === 5);
   check("provisioning tools registered", tools.filter((t) => t.name.startsWith("xui_server_")).length === 4);
+  check("player tools registered", tools.filter((t) => t.name.startsWith("xui_player_")).length === 3);
 
   const del = tools.find((t) => t.name === "xui_delete_line");
   check("delete_line marked destructive", del?.annotations?.destructiveHint === true);

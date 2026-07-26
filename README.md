@@ -5,6 +5,7 @@ An MCP server for XUI.ONE IPTV panels. It covers three layers, so an assistant c
 - **Server provisioning** — install, inspect and repair a panel over SSH
 - **Admin API** — around sixty management actions, for building integrations
 - **Reseller API** — line lifecycle, trials and sub-reseller credits
+- **Player API** — what the customer's app sees, for verifying a line end to end
 
 A stock XUI.ONE install does not serve video. Several defaults are wrong in ways the panel never reports: a licence patch that fails silently, a cron that restarts the service every minute, a probe size too small for ffmpeg to identify codecs, and an output-format field that accepts the wrong shape and then refuses playback with a fake 404. The provisioning tools fix all of them, and [`docs/panel-notes.md`](docs/panel-notes.md) explains each one so the steps are auditable rather than magic.
 
@@ -51,6 +52,18 @@ Needs `XUI_ADMIN_URL` + `XUI_ADMIN_API_KEY` as well. The panel exposes around si
 | `xui_admin_set_line_state` | write | enable / disable / ban / unban a line |
 | `xui_admin_control_stream` | write | start / stop a stream's transcoder |
 | `xui_admin_call` | destructive | Any remaining action — create/edit/delete for users, lines, bouquets, categories, packages, streams, providers, EPG, MAG, Enigma, access codes, HMAC keys |
+
+### Player API — the customer's view
+
+Needs no extra credentials: it authenticates with a line's own username and password. The base is derived from `XUI_URL`; set `XUI_PLAYER_URL` if the panel serves it elsewhere.
+
+| Tool | Kind | Purpose |
+|---|---|---|
+| `xui_player_check_line` | read | Authenticate a line and report expiry, connection limits, allowed formats and server info |
+| `xui_player_browse` | read | The catalogue that line actually receives: live, VOD and series |
+| `xui_player_epg` | read | Short EPG for one stream |
+
+"The panel says the line is active" and "the line actually works" are different questions, and only this surface answers the second. Expiry, connection limits and allowed output formats are all evaluated here — an empty `allowed_output_formats` is the classic cause of a line that logs in but plays nothing.
 
 ### Server provisioning — standing a panel up
 
@@ -161,10 +174,6 @@ These cost real time to discover, and `xui_admin_call` repeats them in its descr
 - **`create_package` ignores `bouquets[]` and `groups[]`** — set them on `users_packages` directly.
 - **Some list actions return a bare JSON array** instead of the envelope. Handled for you.
 
-## Not covered
-
-The Player API (`player_api.php`, `get.php`), which end-user apps call with a line's own credentials. It needs no admin key and is trivially callable over plain HTTP, so wrapping it adds little.
-
 ## Testing
 
 Four layers, all runnable against the mock or a real panel:
@@ -175,6 +184,7 @@ npm run mock &                            # faithful mock of the reseller API
 node scripts/smoke.mjs                    # end-to-end against the mock
 node scripts/validate-live.mjs            # read-only against a real panel
 node scripts/validate-admin.mjs           # admin surface, read-only
+LINE_USER=… LINE_PASS=…   node scripts/validate-player.mjs        # player surface against one line
 PROV_HOST=… PROV_KEY=… \
   node scripts/validate-provision.mjs     # provisioning gates and preflight
 ```
