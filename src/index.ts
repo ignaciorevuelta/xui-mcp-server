@@ -1147,7 +1147,15 @@ account, then use xui_server_status to confirm health.`,
     inputSchema: {
       ...sshFields,
       harden_ssh: z.boolean().default(true).describe("Install a key and turn off password auth"),
-      public_key: z.string().optional().describe("Public key to authorise, e.g. 'ssh-ed25519 AAAA...'"),
+      public_key: z
+        .string()
+        .max(1024)
+        .regex(
+          /^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+/]+={0,2}(\s+\S*)?$/,
+          "Must be a single OpenSSH public key, e.g. 'ssh-ed25519 AAAAC3Nza... comment'",
+        )
+        .optional()
+        .describe("Public key to authorise, e.g. 'ssh-ed25519 AAAA... you@host'"),
       force: z
         .boolean()
         .default(false)

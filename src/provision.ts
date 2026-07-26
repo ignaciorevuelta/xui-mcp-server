@@ -123,12 +123,25 @@ export async function install(
   });
 
   if (opts.hardenSsh && opts.publicKey) {
+    // The key is caller-supplied and this command runs as root, so it must not
+    // reach the shell as text: a single quote in it would escape the literal and
+    // append arbitrary commands. Validate the shape, then move it base64-encoded
+    // — that alphabet contains no shell metacharacters.
+    if (!/^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+/]+={0,2}(\s+\S*)?$/.test(opts.publicKey.trim())) {
+      throw new Error(
+        "public_key is not a valid OpenSSH public key. Expected something like " +
+          "'ssh-ed25519 AAAAC3Nza... comment'.",
+      );
+    }
+    const encodedKey = Buffer.from(opts.publicKey.trim(), "utf8").toString("base64");
+
     // Key first, password auth disabled only after the key is in place.
     steps.push({
       label: "ssh key + disable password auth",
       command: `set -e
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
-grep -qF '${opts.publicKey}' /root/.ssh/authorized_keys 2>/dev/null || echo '${opts.publicKey}' >> /root/.ssh/authorized_keys
+KEY=$(printf %s '${encodedKey}' | base64 -d)
+grep -qxF "$KEY" /root/.ssh/authorized_keys 2>/dev/null || printf '%s\\n' "$KEY" >> /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\nPermitRootLogin prohibit-password\\nPubkeyAuthentication yes\\n' > /etc/ssh/sshd_config.d/00-hardening.conf
 sshd -t && systemctl restart ssh
