@@ -136,7 +136,9 @@ export async function install(
     if (/[\r\n]/.test(key)) {
       throw new Error("public_key must be a single line — it may not contain line breaks.");
     }
-    const parts = /^(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp(?:256|384|521))[ \t]+([A-Za-z0-9+/]+={0,2})(?:[ \t]+[^\r\n]*)?$/.exec(key);
+    // ssh-dss is deliberately absent: OpenSSH disables DSA by default, so accepting
+    // it here would only widen what this path is willing to write.
+    const parts = /^(ssh-(?:rsa|ed25519)|ecdsa-sha2-nistp(?:256|384|521))[ \t]+([A-Za-z0-9+/]+={0,2})(?:[ \t]+[^\r\n]*)?$/.exec(key);
     if (!parts) {
       throw new Error(
         "public_key is not a valid OpenSSH public key. Expected something like " +
@@ -144,15 +146,32 @@ export async function install(
       );
     }
 
-    // The base64 body encodes the key type again; a mismatch means the two halves
-    // were spliced from different keys.
+    // Walk the SSH wire format properly rather than peeking at the first field.
+    // The blob is a sequence of uint32-length-prefixed strings, the first being
+    // the key type. Checking that it parses exactly — no overrun, no trailing
+    // bytes — rejects truncated and spliced keys, not just mislabelled ones.
     const [, keyType, body] = parts;
     const blob = Buffer.from(body!, "base64");
-    const declaredLength = blob.length >= 4 ? blob.readUInt32BE(0) : -1;
-    const embeddedType =
-      declaredLength > 0 && blob.length >= 4 + declaredLength
-        ? blob.subarray(4, 4 + declaredLength).toString("ascii")
-        : "";
+    const fields: Buffer[] = [];
+    let at = 0;
+    while (at < blob.length) {
+      if (at + 4 > blob.length) {
+        throw new Error("public_key is malformed: its body ends mid-length-prefix.");
+      }
+      const len = blob.readUInt32BE(at);
+      at += 4;
+      if (len > blob.length - at) {
+        throw new Error("public_key is malformed: a field claims more bytes than the body holds.");
+      }
+      fields.push(blob.subarray(at, at + len));
+      at += len;
+    }
+    if (fields.length < 2) {
+      throw new Error(
+        "public_key is malformed: its body holds no key material, only a type name.",
+      );
+    }
+    const embeddedType = fields[0]!.toString("ascii");
     if (embeddedType !== keyType) {
       throw new Error(
         `public_key is malformed: it declares ${keyType} but its body encodes ` +

@@ -21,7 +21,10 @@ vi.mock("../src/ssh.js", () => ({
 
 const { install } = await import("../src/provision.js");
 
-const VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOORzslKqnx2fw8eYt7 user@host";
+// A structurally complete ed25519 key: type name and 32-byte body, each
+// length-prefixed, so it survives the wire-format walk in provision.ts.
+const VALID_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH fixture@test";
 
 beforeEach(() => {
   captured.length = 0;
@@ -43,7 +46,7 @@ describe("ssh key installation", () => {
     const step = captured.find((s) => s.label.includes("ssh key"));
     expect(step).toBeDefined();
     // The literal key must not appear; it travels base64-encoded.
-    expect(step!.command).not.toContain("AAAAC3NzaC1lZDI1NTE5");
+    expect(step!.command).not.toContain("AAAAC3NzaC1lZDI1NTE5AAAAIAcHBwc");
     expect(step!.command).toContain("base64 -d");
   });
 
@@ -81,10 +84,20 @@ describe("ssh key installation", () => {
   });
 
   it("rejects a key whose body does not match its declared type", async () => {
-    // Well-formed base64, correct shape, but the blob encodes ssh-rsa.
-    const spliced = "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAAB";
+    // A complete, well-formed ssh-rsa blob wearing an ssh-ed25519 label: it passes
+    // the structural walk, so only the type comparison can catch it.
+    const spliced = "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAAAQAkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=";
     await expect(install({ host: "h" }, { hardenSsh: true, publicKey: spliced })).rejects.toThrow(
       /declares ssh-ed25519/,
+    );
+  });
+
+  it.each([
+    ["a body holding only a type name", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"],
+    ["a field claiming more bytes than exist", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA/w=="],
+  ])("rejects %s", async (_name, key) => {
+    await expect(install({ host: "h" }, { hardenSsh: true, publicKey: key })).rejects.toThrow(
+      /malformed/,
     );
   });
 

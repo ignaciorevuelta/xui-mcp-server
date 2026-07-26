@@ -1375,7 +1375,7 @@ account, then use xui_server_status to confirm health.`,
         // Spaces and tabs only. \s would also match a newline, which would let a
         // second key ride along on its own line in authorized_keys.
         .regex(
-          /^(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp(?:256|384|521))[ \t]+[A-Za-z0-9+/]+={0,2}(?:[ \t]+[^\r\n]*)?$/,
+          /^(ssh-(?:rsa|ed25519)|ecdsa-sha2-nistp(?:256|384|521))[ \t]+[A-Za-z0-9+/]+={0,2}(?:[ \t]+[^\r\n]*)?$/,
           "Must be a single-line OpenSSH public key, e.g. 'ssh-ed25519 AAAAC3Nza... comment'",
         )
         .optional()
