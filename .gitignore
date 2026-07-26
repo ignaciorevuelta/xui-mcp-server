@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Contains XUI_API_KEY — the panel key grants line CRUD over real customers.
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
