@@ -15,6 +15,15 @@ if (!username || !password) {
   process.exit(1);
 }
 
+// The parent environment must not decide what these tests exercise: inheriting a
+// XUI_ALLOW_WRITES=true from the shell would silently turn gate assertions into
+// live calls. Start every child from a known-closed state.
+const CLOSED_GATES = {
+  XUI_ALLOW_WRITES: "false",
+  XUI_ALLOW_DELETE: "false",
+  XUI_ALLOW_PROVISIONING: "false",
+};
+
 let failures = 0;
 const check = (label, ok, detail = "") => {
   if (!ok) failures++;
@@ -25,7 +34,7 @@ const text = (r) => r.content?.[0]?.text ?? "";
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: ["dist/index.js"],
-  env: { ...process.env },
+  env: { ...process.env, ...CLOSED_GATES },
 });
 const client = new Client({ name: "validate-player", version: "1.0.0" });
 await client.connect(transport);
@@ -89,7 +98,7 @@ check("vod catalogue returns a well-formed list", v !== null && Array.isArray(v.
   typeof v.total === "number" && v.items.length === v.count,
   v ? `${v.total} item(s)` : text(vod).slice(0, 70));
 
-if (s && s.total > 0) {
+if (s && Array.isArray(s.items) && s.items.length > 0 && s.items[0]?.stream_id != null) {
   const epg = await client.callTool({
     name: "xui_player_epg",
     arguments: { username, password, stream_id: String(s.items[0].stream_id), response_format: "json" },

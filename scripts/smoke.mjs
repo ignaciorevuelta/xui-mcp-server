@@ -10,6 +10,15 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+// The parent environment must not decide what these tests exercise: inheriting a
+// XUI_ALLOW_WRITES=true from the shell would silently turn gate assertions into
+// live calls. Start every child from a known-closed state.
+const CLOSED_GATES = {
+  XUI_ALLOW_WRITES: "false",
+  XUI_ALLOW_DELETE: "false",
+  XUI_ALLOW_PROVISIONING: "false",
+};
+
 const MOCK = { XUI_URL: "http://127.0.0.1:8899/", XUI_API_KEY: "test-key" };
 
 let failures = 0;
@@ -24,7 +33,7 @@ async function connect(extraEnv) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["dist/index.js"],
-    env: { ...process.env, ...MOCK, ...extraEnv },
+    env: { ...process.env, ...CLOSED_GATES, ...MOCK, ...extraEnv },
   });
   const client = new Client({ name: "smoke", version: "1.0.0" });
   await client.connect(transport);

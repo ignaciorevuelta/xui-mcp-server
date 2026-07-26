@@ -18,6 +18,15 @@ if (!XUI_URL || !XUI_API_KEY) {
   process.exit(1);
 }
 
+// The parent environment must not decide what these tests exercise: inheriting a
+// XUI_ALLOW_WRITES=true from the shell would silently turn gate assertions into
+// live calls. Start every child from a known-closed state.
+const CLOSED_GATES = {
+  XUI_ALLOW_WRITES: "false",
+  XUI_ALLOW_DELETE: "false",
+  XUI_ALLOW_PROVISIONING: "false",
+};
+
 let failures = 0;
 const check = (label, ok, detail = "") => {
   if (!ok) failures++;
@@ -29,7 +38,7 @@ const transport = new StdioClientTransport({
   command: process.execPath,
   args: ["dist/index.js"],
   // Writes deliberately left at their default (disabled).
-  env: { ...process.env, XUI_URL, XUI_API_KEY },
+  env: { ...process.env, ...CLOSED_GATES, XUI_URL, XUI_API_KEY },
 });
 const client = new Client({ name: "validate-live", version: "1.0.0" });
 await client.connect(transport);
