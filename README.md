@@ -1,6 +1,6 @@
 # xui-mcp-server
 
-An MCP server for XUI.ONE IPTV panels. It covers three layers, so an assistant can take a bare server all the way to a working panel and then run it:
+An MCP server for XUI.ONE IPTV panels. It covers four layers, so an assistant can take a bare server all the way to a working panel and then run it:
 
 - **Server provisioning** — install, inspect and repair a panel over SSH
 - **Admin API** — around sixty management actions, for building integrations
@@ -148,7 +148,7 @@ The mock seeds line `1612073` (active) and `1735171` (expired), users `3012` (ke
 
 The panel exposes one endpoint switched by `action`, authenticated with `api_key`:
 
-```
+```json
 GET {XUI_URL}?action=get_line&api_key=...&id=1612073
 → {"status":"STATUS_SUCCESS","data":{"id":"1612073","exp_date":"1793404800",...}}
 → {"status":"STATUS_FAILURE","error":"Invalid API key."}

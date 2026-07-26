@@ -1,7 +1,7 @@
 {
   "name": "xui-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for the XUI.ONE IPTV panel API (reseller surface)",
+  "description": "MCP server for XUI.ONE IPTV panels: provisioning over SSH plus the admin, reseller and player APIs",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

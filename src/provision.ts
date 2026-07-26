@@ -127,13 +127,40 @@ export async function install(
     // reach the shell as text: a single quote in it would escape the literal and
     // append arbitrary commands. Validate the shape, then move it base64-encoded
     // — that alphabet contains no shell metacharacters.
-    if (!/^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+/]+={0,2}(\s+\S*)?$/.test(opts.publicKey.trim())) {
+    const key = opts.publicKey.trim();
+
+    // `\s` in a regex matches newlines, so a pattern built with it would accept
+    // "ssh-ed25519 AAA\nssh-rsa ATTACKER" and authorise two keys. Base64 stops
+    // the shell interpreting the value; it does nothing about a second line.
+    // Match spaces and tabs only, and reject any line break outright.
+    if (/[\r\n]/.test(key)) {
+      throw new Error("public_key must be a single line — it may not contain line breaks.");
+    }
+    const parts = /^(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp(?:256|384|521))[ \t]+([A-Za-z0-9+/]+={0,2})(?:[ \t]+[^\r\n]*)?$/.exec(key);
+    if (!parts) {
       throw new Error(
         "public_key is not a valid OpenSSH public key. Expected something like " +
           "'ssh-ed25519 AAAAC3Nza... comment'.",
       );
     }
-    const encodedKey = Buffer.from(opts.publicKey.trim(), "utf8").toString("base64");
+
+    // The base64 body encodes the key type again; a mismatch means the two halves
+    // were spliced from different keys.
+    const [, keyType, body] = parts;
+    const blob = Buffer.from(body!, "base64");
+    const declaredLength = blob.length >= 4 ? blob.readUInt32BE(0) : -1;
+    const embeddedType =
+      declaredLength > 0 && blob.length >= 4 + declaredLength
+        ? blob.subarray(4, 4 + declaredLength).toString("ascii")
+        : "";
+    if (embeddedType !== keyType) {
+      throw new Error(
+        `public_key is malformed: it declares ${keyType} but its body encodes ` +
+          `${embeddedType || "nothing recognisable"}.`,
+      );
+    }
+
+    const encodedKey = Buffer.from(key, "utf8").toString("base64");
 
     // Key first, password auth disabled only after the key is in place.
     steps.push({

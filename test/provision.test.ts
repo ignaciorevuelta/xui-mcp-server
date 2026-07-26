@@ -27,7 +27,9 @@ beforeEach(() => {
   captured.length = 0;
   resetConfigCache();
   vi.stubEnv("XUI_URL", "http://panel.test/api/");
-  vi.stubEnv("XUI_API_KEY", "k");
+  // Distinctive on purpose: a short value like "k" appears by chance in almost
+  // any shell command and would make the leak assertion below meaningless.
+  vi.stubEnv("XUI_API_KEY", "zzUNIQUEAPIKEY9c1fzz");
 });
 
 afterEach(() => {
@@ -57,14 +59,33 @@ describe("ssh key installation", () => {
     ["single quote breaking out of the literal", "ssh-rsa AAAB' ; rm -rf / ; echo '"],
     ["command substitution", "ssh-rsa AAAB$(id)"],
     ["backtick substitution", "ssh-rsa AAAB`id`"],
-    ["newline injecting a second command", "ssh-rsa AAAB\nrm -rf /"],
     ["not a key at all", "hello world"],
     ["unsupported key type", "ssh-dsa2 AAAB"],
   ])("rejects %s", async (_name, key) => {
+    await expect(install({ host: "h" }, { hardenSsh: true, publicKey: key })).rejects.toThrow();
+    expect(captured.find((s) => s.label.includes("ssh key"))).toBeUndefined();
+  });
+
+  // Base64 keeps the value away from the shell, but says nothing about a second
+  // line: authorized_keys is line-oriented, so a newline would authorise a key
+  // the caller never declared.
+  it.each([
+    ["a trailing second key", `${VALID_KEY}\nssh-rsa AAAAB3NzaC1yc2E attacker@host`],
+    ["a carriage return", `${VALID_KEY}\rssh-rsa AAAAB3NzaC1yc2E attacker@host`],
+    ["a newline inside the comment", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOORz first\nsecond"],
+  ])("rejects %s", async (_name, key) => {
     await expect(install({ host: "h" }, { hardenSsh: true, publicKey: key })).rejects.toThrow(
-      /valid OpenSSH public key/,
+      /single line/,
     );
     expect(captured.find((s) => s.label.includes("ssh key"))).toBeUndefined();
+  });
+
+  it("rejects a key whose body does not match its declared type", async () => {
+    // Well-formed base64, correct shape, but the blob encodes ssh-rsa.
+    const spliced = "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAAB";
+    await expect(install({ host: "h" }, { hardenSsh: true, publicKey: spliced })).rejects.toThrow(
+      /declares ssh-ed25519/,
+    );
   });
 
   it("skips the step entirely when hardening is off", async () => {
@@ -94,5 +115,14 @@ describe("install command set", () => {
     await install({ host: "h" }, { hardenSsh: false });
     const panel = captured.find((s) => s.label === "install panel")!;
     expect(panel.command).toContain("[stored on server]");
+    // The command must not print the credentials file, only acknowledge it.
+    expect(panel.command).not.toMatch(/cat\s+.*credentials\.txt/);
+  });
+
+  it("keeps configured secrets out of every generated command", async () => {
+    await install({ host: "h" }, { hardenSsh: false });
+    for (const step of captured) {
+      expect(step.command).not.toContain(process.env.XUI_API_KEY);
+    }
   });
 });

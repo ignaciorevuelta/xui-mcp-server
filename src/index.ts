@@ -1175,7 +1175,7 @@ Args:
   - limit (number): listings to return, 1-100 (default: 10)
   - response_format ('markdown' | 'json')
 
-Returns: { "stream_id": string, "count": number, "listings": object[] }
+Returns: { "stream_id": string, "count": number, "items": object[] }
 
 Examples:
   - Use when: "The guide is empty in the app" — an empty result here with EPG configured
@@ -1198,7 +1198,8 @@ An empty listing set is normal on a panel with no EPG source configured.`,
   async ({ username, password, stream_id, limit, response_format }): Promise<ToolResult> => {
     try {
       const listings = await shortEpg({ username, password }, stream_id, limit);
-      const output = { stream_id, count: listings.length, listings };
+      // Key must be `items`: that is what respondList trims when a response runs long.
+      const output = { stream_id, count: listings.length, items: listings };
       const md = [
         `# EPG for stream ${stream_id}`,
         "",
@@ -1371,9 +1372,11 @@ account, then use xui_server_status to confirm health.`,
       public_key: z
         .string()
         .max(1024)
+        // Spaces and tabs only. \s would also match a newline, which would let a
+        // second key ride along on its own line in authorized_keys.
         .regex(
-          /^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+/]+={0,2}(\s+\S*)?$/,
-          "Must be a single OpenSSH public key, e.g. 'ssh-ed25519 AAAAC3Nza... comment'",
+          /^(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp(?:256|384|521))[ \t]+[A-Za-z0-9+/]+={0,2}(?:[ \t]+[^\r\n]*)?$/,
+          "Must be a single-line OpenSSH public key, e.g. 'ssh-ed25519 AAAAC3Nza... comment'",
         )
         .optional()
         .describe("Public key to authorise, e.g. 'ssh-ed25519 AAAA... you@host'"),

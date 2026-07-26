@@ -52,40 +52,62 @@ if (!auth.isError) {
   check("server info present", a.panel_version.length > 0, `panel ${a.panel_version}`);
 }
 
+/** Parses only when the call succeeded, so an API error is reported rather than thrown. */
+function parsed(result) {
+  if (result.isError) return null;
+  try {
+    return JSON.parse(text(result));
+  } catch {
+    return null;
+  }
+}
+
 const cats = await client.callTool({
   name: "xui_player_browse",
   arguments: { username, password, resource: "get_live_categories", response_format: "json" },
 });
-check("live categories readable", !cats.isError, `${JSON.parse(text(cats)).total} category(ies)`);
+const c = parsed(cats);
+check("live categories readable", c !== null,
+  c ? `${c.total} category(ies)` : text(cats).slice(0, 70));
 
 const streams = await client.callTool({
   name: "xui_player_browse",
   arguments: { username, password, resource: "get_live_streams", limit: 2, response_format: "json" },
 });
-const s = JSON.parse(text(streams));
-check("live streams readable", !streams.isError, `${s.total} stream(s)`);
-check("pagination applied", s.count <= 2 && typeof s.has_more === "boolean");
+const s = parsed(streams);
+check("live streams readable", s !== null, s ? `${s.total} stream(s)` : text(streams).slice(0, 70));
+check("pagination applied", s !== null && s.count <= 2 && typeof s.has_more === "boolean");
 
-const empty = await client.callTool({
+// A real account may well have VOD, so assert the response shape rather than a
+// count. An empty catalogue is one valid shape among several.
+const vod = await client.callTool({
   name: "xui_player_browse",
   arguments: { username, password, resource: "get_vod_streams", response_format: "json" },
 });
-check("empty catalogue handled", !empty.isError && JSON.parse(text(empty)).total === 0);
+const v = parsed(vod);
+check("vod catalogue returns a well-formed list", v !== null && Array.isArray(v.items) &&
+  typeof v.total === "number" && v.items.length === v.count,
+  v ? `${v.total} item(s)` : text(vod).slice(0, 70));
 
-if (s.total > 0) {
+if (s && s.total > 0) {
   const epg = await client.callTool({
     name: "xui_player_epg",
     arguments: { username, password, stream_id: String(s.items[0].stream_id), response_format: "json" },
   });
-  check("epg readable", !epg.isError, `${JSON.parse(text(epg)).count} listing(s)`);
+  const e = parsed(epg);
+  check("epg readable", e !== null, e ? `${e.count} listing(s)` : text(epg).slice(0, 70));
 }
 
+// A transport failure would also produce isError, which would pass a looser
+// assertion for the wrong reason. Require the panel to answer and say no.
 const bad = await client.callTool({
   name: "xui_player_check_line",
   arguments: { username, password: "definitely-wrong", response_format: "json" },
 });
-check("wrong password reports not authenticated",
-  bad.isError === true || JSON.parse(text(bad)).authenticated === false);
+const b = parsed(bad);
+check("wrong password is rejected by the panel, not by a transport error",
+  b !== null && b.authenticated === false,
+  b === null ? `unexpected error: ${text(bad).slice(0, 60)}` : `auth=${b.authenticated}`);
 
 await client.close();
 console.log(failures === 0 ? "\nPlayer validation passed.\n" : `\n${failures} check(s) FAILED.\n`);

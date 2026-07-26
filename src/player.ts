@@ -86,6 +86,14 @@ function playerUrl(): string {
   }
 }
 
+/** Thrown when the panel answers 404, which it does for rejected credentials. */
+export class PlayerRejected extends XuiError {
+  constructor(message: string) {
+    super(message, "player");
+    this.name = "PlayerRejected";
+  }
+}
+
 async function call(
   creds: LineCredentials,
   params: Record<string, string> = {},
@@ -112,12 +120,18 @@ async function call(
     clearTimeout(timer);
   }
 
-  if (!res.ok) {
-    throw new XuiError(
-      `Player API returned HTTP ${res.status}. A 404 here usually means XUI_PLAYER_URL points ` +
-        `somewhere other than the panel root — it should end in /player_api.php.`,
-      "player",
+  if (res.status === 404) {
+    // The panel answers 404 for credentials it will not accept, which is the far
+    // more likely cause when a username and password were supplied. A wrong base
+    // URL produces the same status, so name both.
+    throw new PlayerRejected(
+      `The panel rejected the line '${creds.username}' (HTTP 404). Either the username or ` +
+        `password is wrong, or the line does not exist. If every line reports this, check ` +
+        `XUI_PLAYER_URL instead — it should end in /player_api.php.`,
     );
+  }
+  if (!res.ok) {
+    throw new XuiError(`Player API returned HTTP ${res.status}.`, "player");
   }
 
   try {
@@ -138,7 +152,32 @@ function truthy(v: unknown): boolean {
 }
 
 export async function authenticate(creds: LineCredentials): Promise<PlayerAuth> {
-  const body = await call(creds);
+  let body: unknown;
+  try {
+    body = await call(creds);
+  } catch (err) {
+    // "Not authenticated" is a normal answer to this question, not a failure of
+    // the tool, so report it as data rather than an error.
+    if (err instanceof PlayerRejected) {
+      return {
+        authenticated: false,
+        username: creds.username,
+        status: "Rejected",
+        message: err.message,
+        expiresAt: null,
+        expiresAtUnix: null,
+        isTrial: false,
+        activeConnections: 0,
+        maxConnections: 0,
+        allowedOutputFormats: [],
+        serverUrl: "",
+        serverPort: "",
+        httpsPort: "",
+        panelVersion: "",
+      };
+    }
+    throw err;
+  }
   const parsed = z
     .object({ user_info: userInfoSchema.optional(), server_info: serverInfoSchema.optional() })
     .passthrough()

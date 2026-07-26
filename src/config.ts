@@ -80,6 +80,18 @@ export function loadConfig(): XuiConfig {
     throw new Error(`XUI_URL is not a valid URL: ${JSON.stringify(url)}`);
   }
 
+  const playerUrlRaw = process.env.XUI_PLAYER_URL?.trim() || undefined;
+  if (playerUrlRaw) {
+    try {
+      const u = new URL(playerUrlRaw);
+      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("scheme");
+    } catch {
+      throw new Error(
+        `XUI_PLAYER_URL must be an http(s) URL ending in /player_api.php, got ${JSON.stringify(playerUrlRaw)}`,
+      );
+    }
+  }
+
   const adminUrl = process.env.XUI_ADMIN_URL?.trim() || undefined;
   const adminApiKey = process.env.XUI_ADMIN_API_KEY?.trim() || undefined;
   if (adminUrl) {
@@ -99,7 +111,7 @@ export function loadConfig(): XuiConfig {
     allowDelete: readBool("XUI_ALLOW_DELETE", false),
     adminUrl,
     adminApiKey,
-    playerUrl: process.env.XUI_PLAYER_URL?.trim() || undefined,
+    playerUrl: playerUrlRaw,
     // On by default: this server is meant to take a machine from bare to working
     // panel, so the tools that do it are available out of the box. Set
     // XUI_ALLOW_PROVISIONING=false to remove remote execution entirely, and
